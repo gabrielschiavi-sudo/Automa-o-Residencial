@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automação Residencial</title>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419; --card: #182028; --card2: #1f2933; --txt: #e6edf3; --mut: #8b98a5;
+    --acc: #3b9eff; --ok: #2ecc71; --err: #ff5d5d; --warn: #f5a623; --bd: #2a3541;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--txt); }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--bd); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  h1 { font-size: 1.15rem; margin: 0; }
+  #status { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--mut); }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); }
+  #dot.on { background: var(--ok); } #dot.wait { background: var(--warn); }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); }
+  section { background: var(--card); border: 1px solid var(--bd); border-radius: 14px; padding: 16px; }
+  section h2 { margin: 0 0 4px; font-size: 1.05rem; display: flex; justify-content: space-between; align-items: center; }
+  .estado { font-size: .75rem; color: var(--mut); font-weight: 400; }
+  .sub { font-size: .75rem; color: var(--mut); margin: 12px 0 6px; text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+  .grid.g2 { grid-template-columns: repeat(2, 1fr); }
+  .grid.g3 { grid-template-columns: repeat(3, 1fr); }
+  button { background: var(--card2); color: var(--txt); border: 1px solid var(--bd); border-radius: 10px; padding: 10px 6px; font-size: .92rem; cursor: pointer; transition: .12s; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  button:hover { border-color: var(--acc); }
+  button:active { transform: scale(.96); background: var(--acc); color: #fff; }
+  button.on { background: #1d4d2e; border-color: var(--ok); }
+  button.off { background: #4d1d1d; border-color: var(--err); }
+  button small { font-size: .62rem; color: var(--mut); word-break: break-all; font-family: ui-monospace, Consolas, monospace; }
+  button:active small { color: #dbeafe; }
+  .ico { font-size: 1.25rem; line-height: 1; }
+  .slider { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .slider input[type=range] { flex: 1; accent-color: var(--acc); }
+  .slider span { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+  .tp { font-size: .62rem; color: var(--mut); font-family: ui-monospace, Consolas, monospace; margin-top: 2px; }
+  .dpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 240px; margin: 0 auto; }
+  /* configuração */
+  details { grid-column: 1 / -1; background: var(--card); border: 1px solid var(--bd); border-radius: 14px; padding: 12px 16px; }
+  summary { cursor: pointer; font-weight: 600; }
+  .cfg { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-top: 12px; }
+  label { font-size: .75rem; color: var(--mut); display: flex; flex-direction: column; gap: 4px; }
+  input[type=text], input[type=password] { background: var(--bg); color: var(--txt); border: 1px solid var(--bd); border-radius: 8px; padding: 8px; font-size: .9rem; }
+  .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .row button { flex-direction: row; padding: 9px 16px; }
+  .primary { background: var(--acc); border-color: var(--acc); color: #fff; }
+  #log { grid-column: 1 / -1; background: #0a0e12; border: 1px solid var(--bd); border-radius: 14px; padding: 12px 16px; font-family: ui-monospace, Consolas, monospace; font-size: .75rem; height: 170px; overflow-y: auto; }
+  #log div { padding: 1px 0; color: var(--mut); }
+  #log .tx { color: #7cc4ff; } #log .rx { color: #8ee6a8; } #log .er { color: var(--err); }
+  .hint { font-size: .72rem; color: var(--mut); margin-top: 8px; line-height: 1.4; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏠 Automação Residencial</h1>
+  <div id="status"><span id="dot"></span><span id="stxt">Desconectado</span></div>
+</header>
+
+<main>
+
+  <!-- CONFIGURAÇÃO -->
+  <details id="cfgBox" open>
+    <summary>⚙️ Conexão MQTT</summary>
+    <div class="cfg">
+      <label>URL do broker (WebSocket)
+        <input type="text" id="cUrl" placeholder="ws://192.168.0.10:9001">
+      </label>
+      <label>Usuário
+        <input type="text" id="cUser" autocomplete="off">
+      </label>
+      <label>Senha
+        <input type="password" id="cPass" autocomplete="off">
+      </label>
+      <label>Prefixo dos tópicos
+        <input type="text" id="cPref" placeholder="casa">
+      </label>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnConn">Conectar</button>
+      <button id="btnDisc">Desconectar</button>
+    </div>
+    <p class="hint">
+      Broker EMQX Cloud via <b>WebSocket seguro (wss)</b>, porta 8084, caminho <code>/mqtt</code>.
+      Os comandos são publicados em <code>PREFIXO/dispositivo/comando</code> e o estado é lido de <code>PREFIXO/dispositivo/estado</code>.
+    </p>
+  </details>
+
+  <!-- AR CONDICIONADO -->
+  <section id="ac">
+    <h2>❄️ Ar-condicionado <span class="estado" data-estado="arcondicionado">—</span></h2>
+    <div class="sub">Energia</div>
+    <div class="grid g2">
+      <button class="on"  data-t="arcondicionado/power" data-p="ON"><span class="ico">⏻</span>Ligar</button>
+      <button class="off" data-t="arcondicionado/power" data-p="OFF"><span class="ico">⏻</span>Desligar</button>
+    </div>
+    <div class="sub">Temperatura</div>
+    <div class="grid g2">
+      <button data-t="arcondicionado/temperatura/diminuir" data-p="1"><span class="ico">➖</span>Diminuir</button>
+      <button data-t="arcondicionado/temperatura/aumentar" data-p="1"><span class="ico">➕</span>Aumentar</button>
+    </div>
+    <div class="slider">
+      <input type="range" id="acTemp" min="16" max="30" value="24">
+      <span id="acTempV">24 °C</span>
+    </div>
+    <div class="tp" id="acTempT"></div>
+    <div class="sub">Modo</div>
+    <div class="grid">
+      <button data-t="arcondicionado/modo" data-p="cool"><span class="ico">❄️</span>Frio</button>
+      <button data-t="arcondicionado/modo" data-p="heat"><span class="ico">🔥</span>Quente</button>
+      <button data-t="arcondicionado/modo" data-p="dry"><span class="ico">💧</span>Seco</button>
+      <button data-t="arcondicionado/modo" data-p="fan_only"><span class="ico">🌀</span>Ventilar</button>
+      <button data-t="arcondicionado/modo" data-p="auto"><span class="ico">🅰️</span>Auto</button>
+    </div>
+    <div class="sub">Ventilador</div>
+    <div class="grid">
+      <button data-t="arcondicionado/ventilador" data-p="auto">Auto</button>
+      <button data-t="arcondicionado/ventilador" data-p="low">Baixo</button>
+      <button data-t="arcondicionado/ventilador" data-p="medium">Médio</button>
+      <button data-t="arcondicionado/ventilador" data-p="high">Alto</button>
+    </div>
+    <div class="sub">Extras</div>
+    <div class="grid g2">
+      <button data-t="arcondicionado/swing" data-p="TOGGLE"><span class="ico">↕️</span>Swing</button>
+      <button data-t="arcondicionado/timer" data-p="60"><span class="ico">⏲️</span>Timer 1h</button>
+    </div>
+  </section>
+
+  <!-- ILUMINAÇÃO -->
+  <section id="luz">
+    <h2>💡 Iluminação</h2>
+    <div class="sub">Todas as luzes</div>
+    <div class="grid g2">
+      <button class="on"  data-t="iluminacao/todas/power" data-p="ON"><span class="ico">💡</span>Ligar todas</button>
+      <button class="off" data-t="iluminacao/todas/power" data-p="OFF"><span class="ico">🌑</span>Apagar todas</button>
+    </div>
+
+    <div id="rooms"></div>
+
+    <div class="sub">Cenas</div>
+    <div class="grid">
+      <button data-t="iluminacao/cena" data-p="filme"><span class="ico">🎬</span>Filme</button>
+      <button data-t="iluminacao/cena" data-p="leitura"><span class="ico">📖</span>Leitura</button>
+      <button data-t="iluminacao/cena" data-p="noite"><span class="ico">🌙</span>Noite</button>
+    </div>
+  </section>
+
+  <!-- TV -->
+  <section id="tv">
+    <h2>📺 TV <span class="estado" data-estado="tv">—</span></h2>
+    <div class="sub">Energia</div>
+    <div class="grid g3">
+      <button class="on"  data-t="tv/power" data-p="ON"><span class="ico">⏻</span>Ligar</button>
+      <button class="off" data-t="tv/power" data-p="OFF"><span class="ico">⏻</span>Desligar</button>
+      <button data-t="tv/fonte" data-p="NEXT"><span class="ico">🔌</span>Fonte</button>
+    </div>
+    <div class="sub">Volume</div>
+    <div class="grid g3">
+      <button data-t="tv/volume/diminuir" data-p="1"><span class="ico">🔉</span>Vol −</button>
+      <button data-t="tv/mudo" data-p="TOGGLE"><span class="ico">🔇</span>Mudo</button>
+      <button data-t="tv/volume/aumentar" data-p="1"><span class="ico">🔊</span>Vol +</button>
+    </div>
+    <div class="sub">Canal</div>
+    <div class="grid g2">
+      <button data-t="tv/canal/anterior" data-p="1"><span class="ico">⏮</span>Canal −</button>
+      <button data-t="tv/canal/proximo" data-p="1"><span class="ico">⏭</span>Canal +</button>
+    </div>
+    <div class="sub">Navegação</div>
+    <div class="dpad">
+      <button data-t="tv/menu" data-p="1">Menu</button>
+      <button data-t="tv/navegacao/cima" data-p="1"><span class="ico">▲</span></button>
+      <button data-t="tv/home" data-p="1">Home</button>
+      <button data-t="tv/navegacao/esquerda" data-p="1"><span class="ico">◀</span></button>
+      <button data-t="tv/navegacao/ok" data-p="1">OK</button>
+      <button data-t="tv/navegacao/direita" data-p="1"><span class="ico">▶</span></button>
+      <button data-t="tv/voltar" data-p="1">Voltar</button>
+      <button data-t="tv/navegacao/baixo" data-p="1"><span class="ico">▼</span></button>
+      <button data-t="tv/info" data-p="1">Info</button>
+    </div>
+    <div class="sub">Apps</div>
+    <div class="grid">
+      <button data-t="tv/app" data-p="netflix">Netflix</button>
+      <button data-t="tv/app" data-p="youtube">YouTube</button>
+      <button data-t="tv/app" data-p="prime">Prime</button>
+    </div>
+  </section>
+
+  <!-- SOM -->
+  <section id="som">
+    <h2>🔊 Som <span class="estado" data-estado="som">—</span></h2>
+    <div class="sub">Energia</div>
+    <div class="grid g2">
+      <button class="on"  data-t="som/power" data-p="ON"><span class="ico">⏻</span>Ligar</button>
+      <button class="off" data-t="som/power" data-p="OFF"><span class="ico">⏻</span>Desligar</button>
+    </div>
+    <div class="sub">Reprodução</div>
+    <div class="grid g3">
+      <button data-t="som/anterior" data-p="1"><span class="ico">⏮</span>Anterior</button>
+      <button data-t="som/reproduzir" data-p="TOGGLE"><span class="ico">⏯</span>Play/Pause</button>
+      <button data-t="som/proxima" data-p="1"><span class="ico">⏭</span>Próxima</button>
+    </div>
+    <div class="grid g2" style="margin-top:8px">
+      <button data-t="som/parar" data-p="1"><span class="ico">⏹</span>Parar</button>
+      <button data-t="som/aleatorio" data-p="TOGGLE"><span class="ico">🔀</span>Aleatório</button>
+    </div>
+    <div class="sub">Volume</div>
+    <div class="grid g3">
+      <button data-t="som/volume/diminuir" data-p="1"><span class="ico">🔉</span>Vol −</button>
+      <button data-t="som/mudo" data-p="TOGGLE"><span class="ico">🔇</span>Mudo</button>
+      <button data-t="som/volume/aumentar" data-p="1"><span class="ico">🔊</span>Vol +</button>
+    </div>
+    <div class="slider">
+      <input type="range" id="somVol" min="0" max="100" value="30">
+      <span id="somVolV">30%</span>
+    </div>
+    <div class="tp" id="somVolT"></div>
+    <div class="sub">Entrada</div>
+    <div class="grid">
+      <button data-t="som/fonte" data-p="bluetooth"><span class="ico">🔵</span>Bluetooth</button>
+      <button data-t="som/fonte" data-p="aux"><span class="ico">🔌</span>AUX</button>
+      <button data-t="som/fonte" data-p="radio"><span class="ico">📻</span>Rádio</button>
+      <button data-t="som/fonte" data-p="tv"><span class="ico">📺</span>TV</button>
+    </div>
+  </section>
+
+  <div id="log"></div>
+</main>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const ROOMS = [
+    { id: 'sala',    nome: 'Sala' },
+    { id: 'quarto',  nome: 'Quarto' },
+    { id: 'cozinha', nome: 'Cozinha' },
+    { id: 'varanda', nome: 'Varanda' },
+  ];
+
+  /* ---------- configuração persistida ---------- */
+  const DEF = { url: 'wss://w8767ca9.ala.us-east-1.emqxsl.com:8084/mqtt', user: 'RICARDO', pass: 'senai', pref: 'casa' };
+  let cfg = { ...DEF };
+  try { cfg = { ...DEF, ...JSON.parse(localStorage.getItem('auto-cfg2') || '{}') }; } catch (e) {}
+  const fill = () => { $('#cUrl').value = cfg.url; $('#cUser').value = cfg.user; $('#cPass').value = cfg.pass; $('#cPref').value = cfg.pref; };
+  fill();
+
+  /* ---------- log ---------- */
+  function log(msg, cls = '') {
+    const d = document.createElement('div');
+    if (cls) d.className = cls;
+    d.textContent = new Date().toLocaleTimeString('pt-BR') + '  ' + msg;
+    const l = $('#log'); l.appendChild(d); l.scrollTop = l.scrollHeight;
+    while (l.children.length > 200) l.removeChild(l.firstChild);
+  }
+
+  /* ---------- UI de cômodos (gerada) ---------- */
+  const roomsEl = $('#rooms');
+  ROOMS.forEach(r => {
+    roomsEl.insertAdjacentHTML('beforeend', `
+      <div class="sub">${r.nome} <span class="estado" data-estado="iluminacao/${r.id}"></span></div>
+      <div class="grid g2">
+        <button class="on"  data-t="iluminacao/${r.id}/power" data-p="ON"><span class="ico">💡</span>Ligar</button>
+        <button class="off" data-t="iluminacao/${r.id}/power" data-p="OFF"><span class="ico">🌑</span>Apagar</button>
+      </div>
+      <div class="slider">
+        <input type="range" min="0" max="100" value="100" data-slider="iluminacao/${r.id}/brilho" data-unit="%">
+        <span>100%</span>
+      </div>
+      <div class="tp" data-tp="iluminacao/${r.id}/brilho"></div>`);
+  });
+
+  /* ---------- MQTT ---------- */
+  let client = null;
+  const topic = t => cfg.pref.replace(/\/+$/, '') + '/' + t;
+
+  function setStatus(kind, txt) {
+    $('#dot').className = kind; $('#stxt').textContent = txt;
+  }
+
+  function connect() {
+    cfg = { url: $('#cUrl').value.trim(), user: $('#cUser').value, pass: $('#cPass').value, pref: $('#cPref').value.trim() || 'casa' };
+    localStorage.setItem('auto-cfg2', JSON.stringify(cfg));
+    refreshTopics();
+    disconnect(true);
+    if (!window.mqtt) { log('Biblioteca MQTT não carregou (verifique a internet).', 'er'); return; }
+    setStatus('wait', 'Conectando…');
+    log('Conectando em ' + cfg.url);
+    const opts = { clientId: 'painel-' + Math.random().toString(16).slice(2, 10), reconnectPeriod: 4000, connectTimeout: 8000, clean: true };
+    if (cfg.user) { opts.username = cfg.user; opts.password = cfg.pass; }
+    try { client = mqtt.connect(cfg.url, opts); } catch (e) { log('Erro: ' + e.message, 'er'); setStatus('', 'Erro'); return; }
+
+    client.on('connect', () => {
+      setStatus('on', 'Conectado');
+      log('Conectado ao broker', 'rx');
+      client.subscribe(topic('+/estado'));
+      client.subscribe(topic('iluminacao/+/estado'));
+      $('#cfgBox').open = false;
+    });
+    client.on('reconnect', () => setStatus('wait', 'Reconectando…'));
+    client.on('close', () => setStatus('', 'Desconectado'));
+    client.on('error', e => log('Erro MQTT: ' + e.message, 'er'));
+    client.on('message', (t, payload) => {
+      const msg = payload.toString();
+      log('◀ ' + t + '  ' + msg, 'rx');
+      const rel = t.slice(cfg.pref.length + 1).replace(/\/estado$/, '');
+      document.querySelectorAll('[data-estado="' + rel + '"]').forEach(el => el.textContent = msg);
+    });
+  }
+
+  function disconnect(silent) {
+    if (client) { client.end(true); client = null; if (!silent) log('Desconectado'); }
+    if (!silent) setStatus('', 'Desconectado');
+  }
+
+  function publish(t, p) {
+    const full = topic(t);
+    if (!client || !client.connected) { log('Sem conexão — comando não enviado: ' + full, 'er'); return; }
+    client.publish(full, String(p), { qos: 0, retain: false }, err => {
+      if (err) log('Falha ao publicar ' + full, 'er');
+    });
+    log('▶ ' + full + '  ' + p, 'tx');
+  }
+
+  /* ---------- rótulos de tópicos nos botões ---------- */
+  function refreshTopics() {
+    document.querySelectorAll('button[data-t]').forEach(b => {
+      let s = b.querySelector('small');
+      if (!s) { s = document.createElement('small'); b.appendChild(s); }
+      s.textContent = topic(b.dataset.t);
+    });
+    document.querySelectorAll('[data-slider]').forEach(i => {
+      const el = i.closest('.slider').nextElementSibling;
+      if (el && el.classList.contains('tp')) el.textContent = topic(i.dataset.slider);
+    });
+    $('#acTempT').textContent = topic('arcondicionado/temperatura/definir');
+    $('#somVolT').textContent = topic('som/volume/definir');
+  }
+
+  /* ---------- eventos ---------- */
+  document.addEventListener('click', e => {
+    const b = e.target.closest('button[data-t]');
+    if (b) publish(b.dataset.t, b.dataset.p);
+  });
+
+  // sliders genéricos (luz) + específicos (temperatura e volume)
+  function bindSlider(input, getTopic, unit) {
+    const span = input.parentElement.querySelector('span');
+    input.addEventListener('input', () => span.textContent = input.value + unit);
+    input.addEventListener('change', () => publish(getTopic(), input.value));
+  }
+  document.querySelectorAll('[data-slider]').forEach(i => bindSlider(i, () => i.dataset.slider, '%'));
+  bindSlider($('#acTemp'), () => 'arcondicionado/temperatura/definir', ' °C');
+  bindSlider($('#somVol'), () => 'som/volume/definir', '%');
+
+  $('#btnConn').addEventListener('click', connect);
+  $('#btnDisc').addEventListener('click', () => disconnect(false));
+
+  refreshTopics();
+  log('Painel pronto. Configure o broker e clique em Conectar.');
+  connect();
+})();
+</script>
+</body>
+</html>
